@@ -4,6 +4,8 @@ import uos
 import utime
 import network
 import ujson
+import gc
+import ntptime
 
 from umqtt.robust import MQTTClient
 
@@ -13,6 +15,7 @@ import mqttcreds
 PIN = const(2)
 
 PIXELS = const(50)
+BPP = const(4)
 COLOUR_MIN = const(0)
 COLOUR_MAX = const(64)
 COLOUR_MULTIPLIER = const(4)
@@ -32,7 +35,7 @@ red = COLOUR_MAX
 green = COLOUR_MAX
 blue = COLOUR_MAX
 
-PING_MQTT_EVERY_MILLISECONDS = const(20000)
+HOUSEKEEPING_INTERVAL_MS = const(20000)
 
 
 client_id = "LEDcontroller"
@@ -48,7 +51,7 @@ def rnw():
 
 def cb(topic, msg):
     global lights_on, weight_red, weight_green, weight_blue, red, green, blue
-    print("Msg:",msg)
+    print("Msg:", msg)
     msg = msg.lower()
     if msg == b"on":
         lights_on = True
@@ -85,7 +88,7 @@ def cb(topic, msg):
         red = COLOUR_MAX
         green = COLOUR_MAX
         blue = COLOUR_MAX
-    elif msg[0] == "{":
+    else:
         try:
             command = ujson.loads(msg)
         except ValueError:
@@ -94,13 +97,16 @@ def cb(topic, msg):
         print(command)
 
 
-c = MQTTClient(client_id, mqttcreds.host, user=mqttcreds.user, password=mqttcreds.password, ssl=mqttcreds.ssl)
-c.set_callback(cb)
+mq = MQTTClient(client_id, mqttcreds.host, user=mqttcreds.user, password=mqttcreds.password, ssl=mqttcreds.ssl)
+mq.set_callback(cb)
+
+print("Setting time from NTP...")
+ntptime.settime()
 
 print("Connecting to MQTT...")
-c.connect()
+mq.connect()
 print("Subscribing to topic...")
-c.subscribe(mqttcreds.topic)
+mq.subscribe(mqttcreds.topic)
 
 machine.freq(160000000)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
@@ -108,15 +114,26 @@ np.fill((0, 0, 0))
 
 lights_on = True
 
+diag = {}
+cycles = 0
 
 while True:
-    c.ping()
-    deadline = utime.ticks_add(utime.ticks_ms(), PING_MQTT_EVERY_MILLISECONDS)
+    print("GC")
+    gc.collect()
+    print("Pinging MQTT")
+    mq.ping()
+    diag["time"] = utime.localtime()
+    diag["cycles_per_sec"] = cycles * 1000 // HOUSEKEEPING_INTERVAL_MS
+    print("Publishing diag:", diag)
+    mq.publish(mqttcreds.mstopic, ujson.dumps(diag))
+    deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
+    cycles = 0
     while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
-        c.check_msg()
+        mq.check_msg()
+        cycles += 1
         if lights_on:
-            np.buf = bytearray([c * fade_multiplier // fade_divider
-                            if c > 1 else 0 for c in np.buf])
+            np.buf = bytearray([v * fade_multiplier // fade_divider
+                            if v > 1 else 0 for v in np.buf])
             rnd = uos.urandom(PIXELS)
             for i in range(0, PIXELS):
                 if rnd[i] < threshold and np[i] == (0, 0, 0):
@@ -132,8 +149,7 @@ while True:
                     rn = rnw()
                     if rn < weight_blue:
                         b *= COLOUR_MULTIPLIER
-                    newColour = (g, r, b)
-                    np[i] = newColour
+                    np[i] = (g, r, b)
         else:
             np.fill((0, 0, 0))
         np.write()
