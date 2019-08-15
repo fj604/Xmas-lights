@@ -97,20 +97,30 @@ def cb(topic, msg):
         print(command)
 
 
-mq = MQTTClient(client_id, mqttcreds.host, user=mqttcreds.user, password=mqttcreds.password, ssl=mqttcreds.ssl)
-mq.set_callback(cb)
-
-print("Setting time from NTP...")
-ntptime.settime()
-
-print("Connecting to MQTT...")
-mq.connect()
-print("Subscribing to topic...")
-mq.subscribe(mqttcreds.topic)
 
 machine.freq(160000000)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
 np.fill((0, 0, 0))
+
+
+mq = MQTTClient(client_id, mqttcreds.host, user=mqttcreds.user, password=mqttcreds.password, ssl=mqttcreds.ssl)
+mq.set_callback(cb)
+
+
+np[0] = (200, 0, 0)
+np.write()
+print("Setting time from NTP...")
+ntptime.settime()
+
+np[1] = (200, 0, 0)
+np.write()
+print("Connecting to MQTT...")
+mq.connect()
+
+np[2] = (200, 0, 0)
+np.write()
+print("Subscribing to topic...")
+mq.subscribe(mqttcreds.topic)
 
 lights_on = True
 
@@ -125,7 +135,7 @@ while True:
     diag["time"] = utime.localtime()
     diag["cycles_per_sec"] = cycles * 1000 // HOUSEKEEPING_INTERVAL_MS
     print("Publishing diag:", diag)
-    mq.publish(mqttcreds.mstopic, ujson.dumps(diag))
+    mq.publish(mqttcreds.diag_topic, ujson.dumps(diag))
     deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
     cycles = 0
     while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
