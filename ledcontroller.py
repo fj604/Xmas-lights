@@ -46,7 +46,7 @@ DELAY_MAX_MS = 20
 
 state_filename = "state.json"
 
-client_id = "LEDcontroller_" + str(ubinascii.hexlify(machine.unique_id()))
+client_id = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
 
 def randrange(a, b):
     rnd = uos.urandom(1)[0]
@@ -111,17 +111,17 @@ def cb(topic, msg):
         red = COLOUR_MAX
         green = COLOUR_MAX
         blue = COLOUR_MAX
-    elif msg == "slower":
+    elif msg == b"slower":
         if delay_ms + DELAY_STEP_MS < DELAY_MAX_MS:
             delay_ms += DELAY_STEP_MS
         else:
             delay_ms = DELAY_MAX_MS
-    elif msg == "faster":
+    elif msg == b"faster":
         if delay_ms > DELAY_STEP_MS:
             deay_ms -= DELAY_STEP_MS
         else:
             delay_ms = 0
-    elif msg == "fastest":
+    elif msg == b"fastest":
         delay_ms = 0
     else:
         try:
@@ -204,6 +204,5 @@ while True:
         else:
             np.fill((0, 0, 0))
         np.write()
-        if delay_ms > 0:
-            utime.sleep_ms(delay_ms)
+        utime.sleep_ms(delay_ms)
         frames += 1
