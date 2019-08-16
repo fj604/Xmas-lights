@@ -1,13 +1,11 @@
+import gc
 import machine
 import neopixel
 import uos
 import utime
 import network
 import ujson
-import gc
-import network
 import ubinascii
-import machine
 
 from umqtt.robust import MQTTClient
 
@@ -17,7 +15,6 @@ import mqttcreds
 PIN = const(2)
 
 PIXELS = const(50)
-BPP = const(4)
 COLOUR_MIN = const(0)
 COLOUR_MAX = const(64)
 COLOUR_MULTIPLIER = const(4)
@@ -31,20 +28,20 @@ FADE_DIVIDER = const(16)
 HOUSEKEEPING_INTERVAL_MS = const(20000)
 DELAY_STEP_MS = const(5)
 DELAY_MAX_MS = const(50)
+STATE_FILENAME = "state.json"
+CLIENT_ID = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
 
-state_filename = "state.json"
 
-client_id = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
-
-def randmax(a):
+def randmax(max_value):
     try:
-        return uos.urandom(1)[0] % a
+        return uos.urandom(1)[0] % max_value
     except ZeroDivisionError:
         return 0
 
 
 def rnw():
     return uos.urandom(1)[0] % (weight_red + weight_green + weight_blue)
+
 
 def set_defaults():
     global lights_on, weight_red, weight_green, weight_blue, white
@@ -64,6 +61,7 @@ def set_defaults():
     lights_on = True
     white = False
 
+
 def save_state():
     state = {}
     state["lights_on"] = lights_on
@@ -80,11 +78,11 @@ def save_state():
     state["colour_multiplier"] = colour_multiplier
     state["threshold"] = threshold
     try:
-        f = open(state_filename, "w")
-        f.write(ujson.dumps(state))
-        f.close()
-    except Exception as e:
-        print("Error saving state file:", e)
+        state_file = open(STATE_FILENAME, "w")
+        state_file.write(ujson.dumps(state))
+        state_file.close()
+    except Exception as exception:
+        print("Error saving state file:", exception)
         return False
     return True
 
@@ -97,9 +95,9 @@ def set_state(state):
 
 def load_state():
     try:
-        f = open(state_filename, "r")
-        state_string = f.read()
-        f.close()
+        state_file = open(STATE_FILENAME, "r")
+        state_string = state_file.read()
+        state_file.close()
     except Exception as e:
         print("Error reading state file:", e)
         return False
@@ -123,7 +121,7 @@ def message_callback(topic, msg):
         lights_on = False
     elif msg == b"white":
         white = True
-    elif msg == b"colour" or msg==b"color":
+    elif msg in(b"colour", b"color"):
         white = False
     elif msg == b"red":
         lights_on = True
@@ -177,10 +175,10 @@ def message_callback(topic, msg):
     elif msg == b"brightest":
         colour_multiplier = COLOUR_MULTIPLIER_MAX
     elif msg == b"sparser":
-        if threshold - THRESHOLD_STEP >= THRESHOLD_MIN :
+        if threshold - THRESHOLD_STEP >= THRESHOLD_MIN:
             threshold -= THRESHOLD_STEP
     elif msg == b"denser":
-        if threshold + THRESHOLD_STEP <= THRESHOLD_MAX :
+        if threshold + THRESHOLD_STEP <= THRESHOLD_MAX:
             threshold += THRESHOLD_STEP
     elif msg == b"sparse":
         threshold = THRESHOLD_MIN
@@ -205,7 +203,8 @@ np.fill((0, 0, 0))
 set_defaults()
 load_state()
 
-mq = MQTTClient(client_id, mqttcreds.host, user=mqttcreds.user, password=mqttcreds.password, ssl=mqttcreds.ssl)
+mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
+                password=mqttcreds.password, ssl=mqttcreds.ssl)
 mq.set_callback(message_callback)
 
 np[0] = (200, 0, 0)
@@ -234,12 +233,12 @@ while True:
         mq.check_msg()
         if lights_on:
             np.buf = bytearray([v * fade_multiplier // fade_divider
-                            if v > 1 else 0 for v in np.buf])
+                               if v > 1 else 0 for v in np.buf])
             rnd = uos.urandom(PIXELS)
             for i in range(0, PIXELS):
                 if rnd[i] < threshold and np[i] == (0, 0, 0):
                     if white:
-                        r = (COLOUR_MAX - 1) * colour_multiplier 
+                        r = (COLOUR_MAX - 1) * colour_multiplier
                         g = (COLOUR_MAX - 1) * colour_multiplier
                         b = (COLOUR_MAX - 1) * colour_multiplier
                     else:
@@ -260,4 +259,3 @@ while True:
             np.fill((0, 0, 0))
         np.write()
         utime.sleep_ms(delay_ms)
- 
