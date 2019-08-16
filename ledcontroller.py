@@ -46,7 +46,7 @@ DELAY_MAX_MS = 20
 
 state_filename = "state.json"
 
-client_id = "LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
+client_id = "LEDcontroller_" + str(ubinascii.hexlify(machine.unique_id()))
 
 def randrange(a, b):
     rnd = uos.urandom(1)[0]
