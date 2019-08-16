@@ -118,7 +118,7 @@ def cb(topic, msg):
             delay_ms = DELAY_MAX_MS
     elif msg == b"faster":
         if delay_ms > DELAY_STEP_MS:
-            deay_ms -= DELAY_STEP_MS
+            delay_ms -= DELAY_STEP_MS
         else:
             delay_ms = 0
     elif msg == b"fastest":
@@ -127,8 +127,8 @@ def cb(topic, msg):
         try:
             command = ujson.loads(msg)
         except ValueError:
-            print("Malformed JSON!")
-            exit
+            print("Unknown command")
+            return
         print(command)
     save_state()
 
