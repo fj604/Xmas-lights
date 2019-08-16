@@ -6,6 +6,9 @@ import network
 import ujson
 import gc
 import ntptime
+import network
+import ubinascii
+import machine
 
 from umqtt.robust import MQTTClient
 
@@ -35,10 +38,15 @@ red = COLOUR_MAX
 green = COLOUR_MAX
 blue = COLOUR_MAX
 
+delay_ms = 0
+
 HOUSEKEEPING_INTERVAL_MS = const(20000)
+DELAY_STEP_MS = const(1)
+DELAY_MAX_MS = 20
 
+state_filename = "state.json"
 
-client_id = "LEDcontroller"
+client_id = "LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
 
 def randrange(a, b):
     rnd = uos.urandom(1)[0]
@@ -49,8 +57,23 @@ def rnw():
     return uos.urandom(1)[0] % (weight_red + weight_green + weight_blue)
 
 
+def save_state():
+    state = {}
+    state["lights_on"] = lights_on
+    state["red"] = red
+    state["green"] = green
+    state["blue"] = blue
+    state["weight_red"] = weight_red
+    state["weight_green"] = weight_green
+    state["weight_blue"] = weight_blue
+    state["delay_ms"] = delay_ms
+    f = open(state_filename, "w")
+    f.write(ujson.dumps(state))
+    f.close()
+
+
 def cb(topic, msg):
-    global lights_on, weight_red, weight_green, weight_blue, red, green, blue
+    global lights_on, weight_red, weight_green, weight_blue, red, green, blue, delay_ms
     print("Msg:", msg)
     msg = msg.lower()
     if msg == b"on":
@@ -88,6 +111,18 @@ def cb(topic, msg):
         red = COLOUR_MAX
         green = COLOUR_MAX
         blue = COLOUR_MAX
+    elif msg == "slower":
+        if delay_ms + DELAY_STEP_MS < DELAY_MAX_MS:
+            delay_ms += DELAY_STEP_MS
+        else:
+            delay_ms = DELAY_MAX_MS
+    elif msg == "faster":
+        if delay_ms > DELAY_STEP_MS:
+            deay_ms -= DELAY_STEP_MS
+        else:
+            delay_ms = 0
+    elif msg == "fastest":
+        delay_ms = 0
     else:
         try:
             command = ujson.loads(msg)
@@ -95,7 +130,7 @@ def cb(topic, msg):
             print("Malformed JSON!")
             exit
         print(command)
-
+    save_state()
 
 
 machine.freq(160000000)
@@ -106,18 +141,24 @@ np.fill((0, 0, 0))
 mq = MQTTClient(client_id, mqttcreds.host, user=mqttcreds.user, password=mqttcreds.password, ssl=mqttcreds.ssl)
 mq.set_callback(cb)
 
-
 np[0] = (200, 0, 0)
+np.write()
+print("Waiting for WiFi...")
+sta = network.WLAN(network.STA_IF)
+while not sta.isconnected():
+    pass
+
+np[1] = (200, 0, 0)
 np.write()
 print("Setting time from NTP...")
 ntptime.settime()
 
-np[1] = (200, 0, 0)
+np[2] = (200, 0, 0)
 np.write()
 print("Connecting to MQTT...")
 mq.connect()
 
-np[2] = (200, 0, 0)
+np[3] = (200, 0, 0)
 np.write()
 print("Subscribing to topic...")
 mq.subscribe(mqttcreds.topic)
@@ -125,7 +166,7 @@ mq.subscribe(mqttcreds.topic)
 lights_on = True
 
 diag = {}
-cycles = 0
+frames = 0
 
 while True:
     print("GC")
@@ -133,14 +174,14 @@ while True:
     print("Pinging MQTT")
     mq.ping()
     diag["time"] = utime.localtime()
-    diag["cycles_per_sec"] = cycles * 1000 // HOUSEKEEPING_INTERVAL_MS
+    diag["fps"] = frames * 1000 // HOUSEKEEPING_INTERVAL_MS
+    diag["freemem"] = str(gc.mem_free())
     print("Publishing diag:", diag)
     mq.publish(mqttcreds.diag_topic, ujson.dumps(diag))
     deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
-    cycles = 0
+    frames = 0
     while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
         mq.check_msg()
-        cycles += 1
         if lights_on:
             np.buf = bytearray([v * fade_multiplier // fade_divider
                             if v > 1 else 0 for v in np.buf])
@@ -163,3 +204,6 @@ while True:
         else:
             np.fill((0, 0, 0))
         np.write()
+        if delay_ms > 0:
+            utime.sleep_ms(delay_ms)
+        frames += 1
