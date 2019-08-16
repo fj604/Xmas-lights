@@ -32,13 +32,6 @@ HOUSEKEEPING_INTERVAL_MS = const(20000)
 DELAY_STEP_MS = const(5)
 DELAY_MAX_MS = const(50)
 
-
-colour_multiplier = COLOUR_MULTIPLIER
-fade_multiplier = FADE_MULTIPLIER
-fade_divider = FADE_DIVIDER
-threshold = THRESHOLD
-
-
 state_filename = "state.json"
 
 client_id = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
@@ -56,16 +49,20 @@ def rnw():
 def set_defaults():
     global lights_on, weight_red, weight_green, weight_blue, white
     global red, green, blue, delay_ms, colour_multiplier, threshold
+    global fade_multiplier, fade_divider
     weight_red = 5
     weight_green = 3
     weight_blue = 3
     red = COLOUR_MAX
     green = COLOUR_MAX
     blue = COLOUR_MAX
+    colour_multiplier = COLOUR_MULTIPLIER
+    fade_multiplier = FADE_MULTIPLIER
+    fade_divider = FADE_DIVIDER
+    threshold = THRESHOLD
     delay_ms = 0
     lights_on = True
     white = False
-
 
 def save_state():
     state = {}
