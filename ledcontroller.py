@@ -18,10 +18,10 @@ COLOUR_MIN = const(0)
 COLOUR_MAX = const(64)
 COLOUR_MULTIPLIER = const(4)
 COLOUR_MULTIPLIER_MAX = 4
-THRESHOLD = const(15)
-THRESHOLD_MAX = const(90)
-THRESHOLD_MIN = const(2)
-THRESHOLD_STEP = const(3)
+DENSITY = const(15)
+DENSITY_MAX = const(90)
+DENSITY_MIN = const(2)
+DENSITY_STEP = const(3)
 FADE_MULTIPLIER = const(15)
 FADE_DIVIDER = const(16)
 HOUSEKEEPING_INTERVAL_MS = const(15000)
@@ -32,12 +32,12 @@ WEIGHT_RED = const(5)
 WEIGHT_GREEN = const(3)
 WEIGHT_BLUE = const(3)
 STATE_FILENAME = "state.json"
-CLIENT_ID = b"LEDcontroller" + ubinascii.hexlify(machine.unique_id())
+CLIENT_ID = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
 
 
 def set_defaults():
     global lights_on, weight_red, weight_green, weight_blue, white
-    global red, green, blue, delay_ms, colour_multiplier, threshold
+    global red, green, blue, delay_ms, colour_multiplier, density
     global fade_multiplier, fade_divider
     weight_red = WEIGHT_RED
     weight_green = WEIGHT_GREEN
@@ -48,7 +48,7 @@ def set_defaults():
     colour_multiplier = COLOUR_MULTIPLIER
     fade_multiplier = FADE_MULTIPLIER
     fade_divider = FADE_DIVIDER
-    threshold = THRESHOLD
+    density = DENSITY
     delay_ms = DELAY_MS
     lights_on = True
     white = False
@@ -68,7 +68,7 @@ def save_state():
     state["fade_multiplier"] = fade_multiplier
     state["fade_divider"] = fade_divider
     state["colour_multiplier"] = colour_multiplier
-    state["threshold"] = threshold
+    state["density"] = density
     try:
         state_file = open(STATE_FILENAME, "w")
         state_file.write(ujson.dumps(state))
@@ -104,7 +104,7 @@ def load_state():
 
 def message_callback(topic, msg):
     global lights_on, weight_red, weight_green, weight_blue, white
-    global red, green, blue, delay_ms, colour_multiplier, threshold
+    global red, green, blue, delay_ms, colour_multiplier, density
     print("Msg:", msg)
     msg = msg.lower()
     if msg == b"on":
@@ -167,15 +167,15 @@ def message_callback(topic, msg):
     elif msg == b"brightest":
         colour_multiplier = COLOUR_MULTIPLIER_MAX
     elif msg == b"sparser":
-        if threshold - THRESHOLD_STEP >= THRESHOLD_MIN:
-            threshold -= THRESHOLD_STEP
+        if density - DENSITY_STEP >= DENSITY_MIN:
+            density -= DENSITY_STEP
     elif msg == b"denser":
-        if threshold + THRESHOLD_STEP <= THRESHOLD_MAX:
-            threshold += THRESHOLD_STEP
+        if density + DENSITY_STEP <= DENSITY_MAX:
+            density += DENSITY_STEP
     elif msg == b"sparse":
-        threshold = THRESHOLD_MIN
+        density = DENSITY_MIN
     elif msg == b"dense":
-        threshold = THRESHOLD_MAX
+        density = DENSITY_MAX
     elif msg == b"save":
         save_state()
     else:
@@ -219,7 +219,7 @@ def do_frame(np):
                         if v > 1 else 0 for v in np.buf])
     rnd = uos.urandom(PIXELS)
     for i in range(0, PIXELS):
-        if rnd[i] < threshold and np[i] == (0, 0, 0):
+        if rnd[i] < density and np[i] == (0, 0, 0):
             np[i] = new_pixel()
 
 
@@ -234,13 +234,13 @@ mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
                 password=mqttcreds.password)
 mq.set_callback(message_callback)
 
-np[0] = (200, 0, 0)
+np[0] = (0, 200, 0)
 np.write()
 sta = network.WLAN(network.STA_IF)
 while not sta.isconnected():
     pass
 
-np[1] = (200, 0, 0)
+np[1] = (200, 200, 0)
 np.write()
 mq.connect()
 
