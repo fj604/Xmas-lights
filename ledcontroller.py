@@ -229,6 +229,7 @@ np.fill((0, 0, 0))
 
 set_defaults()
 load_state()
+lights_on = True
 
 mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
                 password=mqttcreds.password)
