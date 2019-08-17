@@ -3,14 +3,13 @@ import machine
 import neopixel
 import uos
 import utime
-import network
 import ujson
 import ubinascii
+import network
 
 from umqtt.robust import MQTTClient
 
 import mqttcreds
-
 
 PIN = const(2)
 
@@ -25,31 +24,24 @@ THRESHOLD_MIN = const(2)
 THRESHOLD_STEP = const(3)
 FADE_MULTIPLIER = const(15)
 FADE_DIVIDER = const(16)
-HOUSEKEEPING_INTERVAL_MS = const(20000)
+HOUSEKEEPING_INTERVAL_MS = const(15000)
+DELAY_MS = const(10)
 DELAY_STEP_MS = const(5)
 DELAY_MAX_MS = const(50)
+WEIGHT_RED = const(5)
+WEIGHT_GREEN = const(3)
+WEIGHT_BLUE = const(3)
 STATE_FILENAME = "state.json"
-CLIENT_ID = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
-
-
-def randmax(max_value):
-    try:
-        return uos.urandom(1)[0] % max_value
-    except ZeroDivisionError:
-        return 0
-
-
-def rnw():
-    return uos.urandom(1)[0] % (weight_red + weight_green + weight_blue)
+CLIENT_ID = b"LEDcontroller" + ubinascii.hexlify(machine.unique_id())
 
 
 def set_defaults():
     global lights_on, weight_red, weight_green, weight_blue, white
     global red, green, blue, delay_ms, colour_multiplier, threshold
     global fade_multiplier, fade_divider
-    weight_red = 5
-    weight_green = 3
-    weight_blue = 3
+    weight_red = WEIGHT_RED
+    weight_green = WEIGHT_GREEN
+    weight_blue = WEIGHT_BLUE
     red = COLOUR_MAX
     green = COLOUR_MAX
     blue = COLOUR_MAX
@@ -57,7 +49,7 @@ def set_defaults():
     fade_multiplier = FADE_MULTIPLIER
     fade_divider = FADE_DIVIDER
     threshold = THRESHOLD
-    delay_ms = 0
+    delay_ms = DELAY_MS
     lights_on = True
     white = False
 
@@ -196,6 +188,41 @@ def message_callback(topic, msg):
         set_state(new_state)
 
 
+@micropython.native
+def randmax(max_value):
+    return uos.urandom(1)[0] % max_value if max_value else 0
+
+
+@micropython.native
+def new_pixel():
+    if white:
+        r = (COLOUR_MAX - 1) * colour_multiplier
+        g = (COLOUR_MAX - 1) * colour_multiplier
+        b = (COLOUR_MAX - 1) * colour_multiplier
+    else:
+        r = randmax(red)
+        g = randmax(green)
+        b = randmax(blue)
+        total_weight = weight_red + weight_green + weight_blue
+        if randmax(total_weight) < weight_red:
+            r *= colour_multiplier
+        if randmax(total_weight) < weight_green:
+            g *= colour_multiplier
+        if randmax(total_weight) < weight_blue:
+            b *= colour_multiplier
+    return(g, r, b)
+
+
+@micropython.native
+def do_frame(np):
+    np.buf = bytearray([v * fade_multiplier // fade_divider
+                        if v > 1 else 0 for v in np.buf])
+    rnd = uos.urandom(PIXELS)
+    for i in range(0, PIXELS):
+        if rnd[i] < threshold and np[i] == (0, 0, 0):
+            np[i] = new_pixel()
+
+
 machine.freq(160000000)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
 np.fill((0, 0, 0))
@@ -204,24 +231,21 @@ set_defaults()
 load_state()
 
 mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
-                password=mqttcreds.password, ssl=mqttcreds.ssl)
+                password=mqttcreds.password)
 mq.set_callback(message_callback)
 
 np[0] = (200, 0, 0)
 np.write()
-print("Waiting for WiFi...")
 sta = network.WLAN(network.STA_IF)
 while not sta.isconnected():
     pass
 
 np[1] = (200, 0, 0)
 np.write()
-print("Connecting to MQTT...")
 mq.connect()
 
 np[2] = (200, 0, 0)
 np.write()
-print("Subscribing to topic...")
 mq.subscribe(mqttcreds.topic)
 
 
@@ -229,33 +253,14 @@ while True:
     gc.collect()
     mq.ping()
     deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
+    frames = 0
     while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
         mq.check_msg()
         if lights_on:
-            np.buf = bytearray([v * fade_multiplier // fade_divider
-                               if v > 1 else 0 for v in np.buf])
-            rnd = uos.urandom(PIXELS)
-            for i in range(0, PIXELS):
-                if rnd[i] < threshold and np[i] == (0, 0, 0):
-                    if white:
-                        r = (COLOUR_MAX - 1) * colour_multiplier
-                        g = (COLOUR_MAX - 1) * colour_multiplier
-                        b = (COLOUR_MAX - 1) * colour_multiplier
-                    else:
-                        r = randmax(red)
-                        g = randmax(green)
-                        b = randmax(blue)
-                        rn = rnw()
-                        if rn < weight_red:
-                            r *= colour_multiplier
-                        rn = rnw()
-                        if rn < weight_green:
-                            g *= colour_multiplier
-                        rn = rnw()
-                        if rn < weight_blue:
-                            b *= colour_multiplier
-                    np[i] = (g, r, b)
+            do_frame(np)
         else:
             np.fill((0, 0, 0))
         np.write()
+        frames += 1
         utime.sleep_ms(delay_ms)
+    print("FPS:", frames * 1000 // HOUSEKEEPING_INTERVAL_MS)
