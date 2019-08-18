@@ -18,10 +18,10 @@ COLOUR_MIN = const(0)
 COLOUR_MAX = const(64)
 COLOUR_MULTIPLIER = const(4)
 COLOUR_MULTIPLIER_MAX = 4
-DENSITY = const(15)
-DENSITY_MAX = const(90)
-DENSITY_MIN = const(2)
-DENSITY_STEP = const(3)
+DENSITY = const(16)
+DENSITY_MAX = const(128)
+DENSITY_MIN = const(1)
+DENSITY_STEP_MULTIPLIER = const(2)
 FADE_MULTIPLIER = const(15)
 FADE_DIVIDER = const(16)
 HOUSEKEEPING_INTERVAL_MS = const(15000)
@@ -34,6 +34,10 @@ WEIGHT_BLUE = const(3)
 STATE_FILENAME = "state.json"
 CLIENT_ID = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
 
+RED_PIXEL = (0, 200, 0)
+YELLOW_PIXEL = (200, 200, 0)
+GREEN_PIXEL = (200, 0, 0)
+BLACK_PIXEL = (0,0,0)
 
 def set_defaults():
     global lights_on, weight_red, weight_green, weight_blue, white
@@ -116,7 +120,6 @@ def message_callback(topic, msg):
     elif msg in(b"colour", b"color"):
         white = False
     elif msg == b"red":
-        lights_on = True
         white = False
         weight_red = 10
         weight_green = 0
@@ -125,7 +128,6 @@ def message_callback(topic, msg):
         green = 0
         blue = 0
     elif msg == b"green":
-        lights_on = True
         white = False
         weight_red = 0
         weight_green = 10
@@ -134,7 +136,6 @@ def message_callback(topic, msg):
         green = COLOUR_MAX
         blue = 0
     elif msg == b"blue":
-        lights_on = True
         white = False
         weight_red = 0
         weight_green = 0
@@ -167,11 +168,11 @@ def message_callback(topic, msg):
     elif msg == b"brightest":
         colour_multiplier = COLOUR_MULTIPLIER_MAX
     elif msg == b"sparser":
-        if density - DENSITY_STEP >= DENSITY_MIN:
-            density -= DENSITY_STEP
+        if density > DENSITY_MIN:
+            density /= DENSITY_STEP_MULTIPLIER
     elif msg == b"denser":
-        if density + DENSITY_STEP <= DENSITY_MAX:
-            density += DENSITY_STEP
+        if density < DENSITY_MAX:
+            density *= DENSITY_STEP_MULTIPLIER
     elif msg == b"sparse":
         density = DENSITY_MIN
     elif msg == b"dense":
@@ -225,7 +226,7 @@ def do_frame(np):
 
 machine.freq(160000000)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
-np.fill((0, 0, 0))
+np.fill(BLACK_PIXEL)
 
 set_defaults()
 load_state()
@@ -235,17 +236,17 @@ mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
                 password=mqttcreds.password)
 mq.set_callback(message_callback)
 
-np[0] = (0, 200, 0)
+np[0] = RED_PIXEL 
 np.write()
 sta = network.WLAN(network.STA_IF)
 while not sta.isconnected():
     pass
 
-np[1] = (200, 200, 0)
+np[1] = YELLOW_PIXEL
 np.write()
 mq.connect()
 
-np[2] = (200, 0, 0)
+np[2] = GREEN_PIXEL
 np.write()
 mq.subscribe(mqttcreds.topic)
 
@@ -260,7 +261,7 @@ while True:
         if lights_on:
             do_frame(np)
         else:
-            np.fill((0, 0, 0))
+            np.fill(BLACK_PIXEL)
         np.write()
         frames += 1
         utime.sleep_ms(delay_ms)
