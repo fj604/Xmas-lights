@@ -33,11 +33,14 @@ WEIGHT_GREEN = const(3)
 WEIGHT_BLUE = const(3)
 STATE_FILENAME = "state.json"
 CLIENT_ID = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
+RETRY_DELAY_MS = 500
+
 
 RED_PIXEL = (0, 200, 0)
 YELLOW_PIXEL = (200, 200, 0)
 GREEN_PIXEL = (200, 0, 0)
-BLACK_PIXEL = (0,0,0)
+BLACK_PIXEL = (0, 0, 0)
+
 
 def set_defaults():
     global lights_on, weight_red, weight_green, weight_blue, white
@@ -220,7 +223,7 @@ def do_frame(np):
                         if v > 1 else 0 for v in np.buf])
     rnd = uos.urandom(PIXELS)
     for i in range(0, PIXELS):
-        if rnd[i] < density and np[i] == (0, 0, 0):
+        if rnd[i] < density and np[i] == BLACK_PIXEL:
             np[i] = new_pixel()
 
 
@@ -244,11 +247,25 @@ while not sta.isconnected():
 
 np[1] = YELLOW_PIXEL
 np.write()
-mq.connect()
+mq_connected = False
+while not mq_connected:
+    try:
+        mq.connect()
+        mq_connected = True
+    except Exception as exception:
+        print("Can't connect to MQ:", exception)
+        utime.sleep_ms(delay_ms)
 
 np[2] = GREEN_PIXEL
 np.write()
-mq.subscribe(mqttcreds.topic)
+mq_subscribed = False
+while not mq_subscribed:
+    try:
+        mq.subscribe(mqttcreds.topic)
+        mq_subscribed = True
+    except Exception as exception:
+        print("Can't subscribe to MQ topic:", exception)
+        utime.sleep_ms(delay_ms)
 
 
 while True:
