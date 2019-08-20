@@ -1,4 +1,5 @@
 import gc
+import micropython
 import machine
 import neopixel
 import uos
@@ -12,12 +13,13 @@ from umqtt.robust import MQTTClient
 import mqttcreds
 
 PIN = const(2)
-
 PIXELS = const(50)
+
+WD_TIMEOUT_MS = 1000 
 COLOUR_MIN = const(0)
 COLOUR_MAX = const(64)
-COLOUR_MULTIPLIER = const(4)
-COLOUR_MULTIPLIER_MAX = 4
+BOOST_MULTIPLIER = const(4)
+BOOST_MULTIPLIER_MAX = 4
 DENSITY = const(16)
 DENSITY_MAX = const(128)
 DENSITY_MIN = const(1)
@@ -33,18 +35,35 @@ WEIGHT_GREEN = const(3)
 WEIGHT_BLUE = const(3)
 STATE_FILENAME = "state.json"
 CLIENT_ID = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
-RETRY_DELAY_MS = 500
+RETRY_DELAY_MS = const(500)
 
+COLOURS = {
+    "black"   : (0, 0, 0),
+    "red"     : (0, 1, 0),
+    "green"   : (1, 0, 0),
+    "blue"    : (0, 0, 1),
+    "yellow"  : (1, 1, 0),
+    "cyan"    : (1, 0, 1),
+    "magenta" : (0, 1, 1),
+    "white"   : (1, 1, 1)
+}
 
-RED_PIXEL = (0, 200, 0)
-YELLOW_PIXEL = (200, 200, 0)
-GREEN_PIXEL = (200, 0, 0)
-BLACK_PIXEL = (0, 0, 0)
+BLACK_PIXEL = COLOURS["black"]
+
+def colour_max(colour, max_c):
+    ret_colour = []
+    if colour in COLOURS:
+        found_c = COLOURS[colour]
+        ret_colour = [i * max_c for i in found_c]
+        return tuple(ret_colour)
+    else:
+        return False
 
 
 def set_defaults():
-    global lights_on, weight_red, weight_green, weight_blue, white
-    global red, green, blue, delay_ms, colour_multiplier, density
+    global lights_on, weight_red, weight_green, weight_blue
+    global monochrome, red, green, blue
+    global delay_ms, boost_multiplier, density
     global fade_multiplier, fade_divider
     weight_red = WEIGHT_RED
     weight_green = WEIGHT_GREEN
@@ -52,19 +71,19 @@ def set_defaults():
     red = COLOUR_MAX
     green = COLOUR_MAX
     blue = COLOUR_MAX
-    colour_multiplier = COLOUR_MULTIPLIER
+    boost_multiplier = BOOST_MULTIPLIER
     fade_multiplier = FADE_MULTIPLIER
     fade_divider = FADE_DIVIDER
     density = DENSITY
     delay_ms = DELAY_MS
     lights_on = True
-    white = False
+    monochrome = False
 
 
 def save_state():
     state = {}
     state["lights_on"] = lights_on
-    state["white"] = white
+    state["monochrome"] = monochrome
     state["red"] = red
     state["green"] = green
     state["blue"] = blue
@@ -74,13 +93,13 @@ def save_state():
     state["delay_ms"] = delay_ms
     state["fade_multiplier"] = fade_multiplier
     state["fade_divider"] = fade_divider
-    state["colour_multiplier"] = colour_multiplier
+    state["boost_multiplier"] = boost_multiplier
     state["density"] = density
     try:
         state_file = open(STATE_FILENAME, "w")
         state_file.write(ujson.dumps(state))
         state_file.close()
-    except Exception as exception:
+    except OSError as exception:
         print("Error saving state file:", exception)
         return False
     return True
@@ -110,42 +129,16 @@ def load_state():
 
 
 def message_callback(topic, msg):
-    global lights_on, weight_red, weight_green, weight_blue, white
-    global red, green, blue, delay_ms, colour_multiplier, density
+    global lights_on, weight_red, weight_green, weight_blue, monochrome
+    global red, green, blue, delay_ms, boost_multiplier, density
     print("Msg:", msg)
     msg = msg.lower()
     if msg == b"on":
         lights_on = True
     elif msg == b"off":
         lights_on = False
-    elif msg == b"white":
-        white = True
     elif msg in(b"colour", b"color"):
-        white = False
-    elif msg == b"red":
-        white = False
-        weight_red = 10
-        weight_green = 0
-        weight_blue = 0
-        red = COLOUR_MAX
-        green = 0
-        blue = 0
-    elif msg == b"green":
-        white = False
-        weight_red = 0
-        weight_green = 10
-        weight_blue = 0
-        red = 0
-        green = COLOUR_MAX
-        blue = 0
-    elif msg == b"blue":
-        white = False
-        weight_red = 0
-        weight_green = 0
-        weight_blue = 10
-        red = 0
-        green = 0
-        blue = COLOUR_MAX
+        monochrome = False
     elif msg == b"normal":
         set_defaults()
     elif msg == b"slower":
@@ -163,13 +156,13 @@ def message_callback(topic, msg):
     elif msg == b"fast":
         delay_ms = 0
     elif msg == b"dimmer":
-        if colour_multiplier > 1:
-            colour_multiplier -= 1
+        if boost_multiplier > 1:
+            boost_multiplier -= 1
     elif msg == b"brighter":
-        if colour_multiplier < COLOUR_MULTIPLIER_MAX:
-            colour_multiplier += 1
+        if boost_multiplier < BOOST_MULTIPLIER_MAX:
+            boost_multiplier += 1
     elif msg == b"brightest":
-        colour_multiplier = COLOUR_MULTIPLIER_MAX
+        boost_multiplier = BOOST_MULTIPLIER_MAX
     elif msg == b"sparser":
         if density > DENSITY_MIN:
             density /= DENSITY_STEP_MULTIPLIER
@@ -182,6 +175,9 @@ def message_callback(topic, msg):
         density = DENSITY_MAX
     elif msg == b"save":
         save_state()
+    elif msg.decode() in COLOURS:
+        print("Setting colour to", msg)
+        monochrome = COLOURS[msg.decode()]
     else:
         try:
             new_state = ujson.loads(msg)
@@ -197,23 +193,26 @@ def randmax(max_value):
     return uos.urandom(1)[0] % max_value if max_value else 0
 
 
+def new_pixel_monochrome():
+    m = randmax(COLOUR_MAX)
+    c = []
+    for i in monochrome:
+        c.append(i * m * boost_multiplier)
+    return tuple(c)
+
+
 @micropython.native
-def new_pixel():
-    if white:
-        r = (COLOUR_MAX - 1) * colour_multiplier
-        g = (COLOUR_MAX - 1) * colour_multiplier
-        b = (COLOUR_MAX - 1) * colour_multiplier
-    else:
-        r = randmax(red)
-        g = randmax(green)
-        b = randmax(blue)
-        total_weight = weight_red + weight_green + weight_blue
-        if randmax(total_weight) < weight_red:
-            r *= colour_multiplier
-        if randmax(total_weight) < weight_green:
-            g *= colour_multiplier
-        if randmax(total_weight) < weight_blue:
-            b *= colour_multiplier
+def new_pixel_random():
+    r = randmax(red)
+    g = randmax(green)
+    b = randmax(blue)
+    total_weight = weight_red + weight_green + weight_blue
+    if randmax(total_weight) < weight_red:
+        r *= boost_multiplier
+    if randmax(total_weight) < weight_green:
+        g *= boost_multiplier
+    if randmax(total_weight) < weight_blue:
+        b *= boost_multiplier
     return(g, r, b)
 
 
@@ -224,9 +223,17 @@ def do_frame(np):
     rnd = uos.urandom(PIXELS)
     for i in range(0, PIXELS):
         if rnd[i] < density and np[i] == BLACK_PIXEL:
-            np[i] = new_pixel()
+            np[i] = new_pixel_monochrome() if monochrome else new_pixel_random()
 
 
+def wdt(timer):
+    global wd_fed
+    if not wd_fed:
+        machine.reset()
+    wd_fed = False
+
+
+micropython.alloc_emergency_exception_buf(100)
 machine.freq(160000000)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
 np.fill(BLACK_PIXEL)
@@ -239,13 +246,15 @@ mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
                 password=mqttcreds.password)
 mq.set_callback(message_callback)
 
-np[0] = RED_PIXEL 
+print("Waiting for WiFi...")
+np[0] = COLOURS["red"] 
 np.write()
 sta = network.WLAN(network.STA_IF)
 while not sta.isconnected():
     pass
 
-np[1] = YELLOW_PIXEL
+print("Connecting to MQ...")
+np[1] = COLOURS["yellow"]
 np.write()
 mq_connected = False
 while not mq_connected:
@@ -256,7 +265,8 @@ while not mq_connected:
         print("Can't connect to MQ:", exception)
         utime.sleep_ms(delay_ms)
 
-np[2] = GREEN_PIXEL
+print("Subscribing to MQ...")
+np[2] = COLOURS["green"]
 np.write()
 mq_subscribed = False
 while not mq_subscribed:
@@ -267,7 +277,12 @@ while not mq_subscribed:
         print("Can't subscribe to MQ topic:", exception)
         utime.sleep_ms(delay_ms)
 
+print("Setting watchdog timer...")
+wd_fed = True
+wd = machine.Timer(-1)
+wd.init(period = WD_TIMEOUT_MS, mode=wd.PERIODIC, callback = wdt)
 
+print("Starting work cycle...")
 while True:
     gc.collect()
     mq.ping()
@@ -275,6 +290,7 @@ while True:
     frames = 0
     while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
         mq.check_msg()
+        wd_fed = True
         if lights_on:
             do_frame(np)
         else:
