@@ -7,6 +7,7 @@ import utime
 import ujson
 import ubinascii
 import network
+import sys
 
 from umqtt.robust import MQTTClient
 
@@ -48,7 +49,11 @@ COLOURS = {
     "white"   : (1, 1, 1)
 }
 
-BLACK_PIXEL = COLOURS["black"]
+BLACK_PIXEL  = (0, 0, 0)
+RED_PIXEL    = (0, 128, 0)
+YELLOW_PIXEL = (128, 128, 0)
+GREEN_PIXEL  = (128, 0, 0)
+
 
 def colour_max(colour, max_c):
     ret_colour = []
@@ -233,28 +238,31 @@ def wdt(timer):
     wd_fed = False
 
 
+print("Initialising")
 micropython.alloc_emergency_exception_buf(100)
 machine.freq(160000000)
+
+mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
+                password=mqttcreds.password)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
+
 np.fill(BLACK_PIXEL)
 
 set_defaults()
 load_state()
 lights_on = True
 
-mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
-                password=mqttcreds.password)
 mq.set_callback(message_callback)
 
-print("Waiting for WiFi...")
-np[0] = COLOURS["red"] 
+print("Waiting for WiFi")
+np[0] = RED_PIXEL
 np.write()
 sta = network.WLAN(network.STA_IF)
 while not sta.isconnected():
     pass
 
-print("Connecting to MQ...")
-np[1] = COLOURS["yellow"]
+print("Connecting to MQ")
+np[1] = YELLOW_PIXEL
 np.write()
 mq_connected = False
 while not mq_connected:
@@ -265,8 +273,8 @@ while not mq_connected:
         print("Can't connect to MQ:", exception)
         utime.sleep_ms(delay_ms)
 
-print("Subscribing to MQ...")
-np[2] = COLOURS["green"]
+print("Subscribing to MQ")
+np[2] = GREEN_PIXEL
 np.write()
 mq_subscribed = False
 while not mq_subscribed:
@@ -277,25 +285,30 @@ while not mq_subscribed:
         print("Can't subscribe to MQ topic:", exception)
         utime.sleep_ms(delay_ms)
 
-print("Setting watchdog timer...")
+print("Setting watchdog timer")
 wd_fed = True
 wd = machine.Timer(-1)
 wd.init(period = WD_TIMEOUT_MS, mode=wd.PERIODIC, callback = wdt)
 
-print("Starting work cycle...")
+print("Starting main loop")
 while True:
-    gc.collect()
-    mq.ping()
-    deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
-    frames = 0
-    while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
-        mq.check_msg()
-        wd_fed = True
-        if lights_on:
-            do_frame(np)
-        else:
-            np.fill(BLACK_PIXEL)
-        np.write()
-        frames += 1
-        utime.sleep_ms(delay_ms)
-    print("FPS:", frames * 1000 // HOUSEKEEPING_INTERVAL_MS)
+    try:
+        gc.collect()
+        mq.ping()
+        deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
+        frames = 0
+        while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
+                mq.check_msg()
+                wd_fed = True
+                if lights_on:
+                    do_frame(np)
+                else:
+                    np.fill(BLACK_PIXEL)
+                np.write()
+                frames += 1
+                utime.sleep_ms(delay_ms)
+        print("FPS:", frames * 1000 // HOUSEKEEPING_INTERVAL_MS)
+    except KeyboardInterrupt:
+        wd.deinit()
+        print("Ctrl+C pressed, exiting")
+        sys.exit(1)
