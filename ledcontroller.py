@@ -16,7 +16,7 @@ import mqttcreds
 PIN = const(2)
 PIXELS = const(50)
 
-WD_TIMEOUT_MS = 1000 
+WD_TIMEOUT_MS = 1000
 COLOUR_MIN = const(0)
 COLOUR_MAX = const(64)
 BOOST_MULTIPLIER = const(4)
@@ -39,20 +39,20 @@ CLIENT_ID = b"LEDcontroller_" + ubinascii.hexlify(machine.unique_id())
 RETRY_DELAY_MS = const(500)
 
 COLOURS = {
-    "black"   : (0, 0, 0),
-    "red"     : (0, 1, 0),
-    "green"   : (1, 0, 0),
-    "blue"    : (0, 0, 1),
-    "yellow"  : (1, 1, 0),
-    "cyan"    : (1, 0, 1),
-    "magenta" : (0, 1, 1),
-    "white"   : (1, 1, 1)
+    "black":   (0, 0, 0),
+    "red":     (0, 1, 0),
+    "green":   (1, 0, 0),
+    "blue":    (0, 0, 1),
+    "yellow":  (1, 1, 0),
+    "cyan":    (1, 0, 1),
+    "magenta": (0, 1, 1),
+    "white":   (1, 1, 1)
 }
 
-BLACK_PIXEL  = (0, 0, 0)
-RED_PIXEL    = (0, 128, 0)
+BLACK_PIXEL = (0, 0, 0)
+RED_PIXEL = (0, 128, 0)
 YELLOW_PIXEL = (128, 128, 0)
-GREEN_PIXEL  = (128, 0, 0)
+GREEN_PIXEL = (128, 0, 0)
 
 
 def colour_max(colour, max_c):
@@ -228,7 +228,8 @@ def do_frame(np):
     rnd = uos.urandom(PIXELS)
     for i in range(0, PIXELS):
         if rnd[i] < density and np[i] == BLACK_PIXEL:
-            np[i] = new_pixel_monochrome() if monochrome else new_pixel_random()
+            np[i] = (new_pixel_monochrome() if monochrome
+                     else new_pixel_random())
 
 
 def wdt(timer):
@@ -288,7 +289,7 @@ while not mq_subscribed:
 print("Setting watchdog timer")
 wd_fed = True
 wd = machine.Timer(-1)
-wd.init(period = WD_TIMEOUT_MS, mode=wd.PERIODIC, callback = wdt)
+wd.init(period=WD_TIMEOUT_MS, mode=wd.PERIODIC, callback=wdt)
 
 print("Starting main loop")
 while True:
@@ -298,15 +299,15 @@ while True:
         deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
         frames = 0
         while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
-                mq.check_msg()
-                wd_fed = True
-                if lights_on:
-                    do_frame(np)
-                else:
-                    np.fill(BLACK_PIXEL)
-                np.write()
-                frames += 1
-                utime.sleep_ms(delay_ms)
+            mq.check_msg()
+            wd_fed = True
+            if lights_on:
+                do_frame(np)
+            else:
+                np.fill(BLACK_PIXEL)
+            np.write()
+            frames += 1
+            utime.sleep_ms(delay_ms)
         print("FPS:", frames * 1000 // HOUSEKEEPING_INTERVAL_MS)
     except KeyboardInterrupt:
         wd.deinit()
