@@ -53,6 +53,7 @@ BLACK_PIXEL = (0, 0, 0)
 RED_PIXEL = (0, 128, 0)
 YELLOW_PIXEL = (128, 128, 0)
 GREEN_PIXEL = (128, 0, 0)
+DEFAULT_SOLID = (64, 64, 64)
 
 
 def colour_max(colour, max_c):
@@ -67,7 +68,7 @@ def colour_max(colour, max_c):
 
 def set_defaults():
     global lights_on, weight_red, weight_green, weight_blue
-    global monochrome, red, green, blue
+    global monochrome, animation, solid, red, green, blue
     global delay_ms, boost_multiplier, density
     global fade_multiplier, fade_divider
     weight_red = WEIGHT_RED
@@ -81,6 +82,8 @@ def set_defaults():
     fade_divider = FADE_DIVIDER
     density = DENSITY
     delay_ms = DELAY_MS
+    solid = DEFAULT_SOLID
+    animation = True
     lights_on = True
     monochrome = False
 
@@ -89,6 +92,8 @@ def save_state():
     state = {}
     state["lights_on"] = lights_on
     state["monochrome"] = monochrome
+    state["solid"] = solid
+    state["animation"] = animation
     state["red"] = red
     state["green"] = green
     state["blue"] = blue
@@ -135,7 +140,7 @@ def load_state():
 
 def message_callback(topic, msg):
     global lights_on, weight_red, weight_green, weight_blue, monochrome
-    global red, green, blue, delay_ms, boost_multiplier, density
+    global animation, red, green, blue, delay_ms, boost_multiplier, density
     print("Msg:", msg)
     msg = msg.lower()
     if msg == b"on":
@@ -180,12 +185,16 @@ def message_callback(topic, msg):
         density = DENSITY_MAX
     elif msg == b"save":
         save_state()
+    elif msg == b"solid":
+        animation = False
+    elif msg in (b"sparkle", b"sparkling"):
+        animation = True
     elif msg.decode() in COLOURS:
         print("Setting colour to", msg)
         monochrome = COLOURS[msg.decode()]
     else:
         try:
-            new_state = ujson.loads(msg)
+            new_state = ujson.loads(msg.decode())
         except ValueError:
             print("Unknown command")
             return
@@ -222,7 +231,7 @@ def new_pixel_random():
 
 
 @micropython.native
-def do_frame(np):
+def animate(np):
     np.buf = bytearray([v * fade_multiplier // fade_divider
                         if v > 1 else 0 for v in np.buf])
     rnd = uos.urandom(PIXELS)
@@ -302,7 +311,10 @@ while True:
             mq.check_msg()
             wd_fed = True
             if lights_on:
-                do_frame(np)
+                if animation:
+                    animate(np)
+                else:
+                    np.fill(solid)
             else:
                 np.fill(BLACK_PIXEL)
             np.write()
