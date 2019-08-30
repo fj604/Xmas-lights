@@ -141,6 +141,7 @@ def load_state():
 def message_callback(topic, msg):
     global lights_on, weight_red, weight_green, weight_blue, monochrome
     global animation, red, green, blue, delay_ms, boost_multiplier, density
+    global solid
     print("Msg:", msg)
     msg = msg.lower()
     if msg == b"on":
@@ -192,6 +193,10 @@ def message_callback(topic, msg):
     elif msg.decode() in COLOURS:
         print("Setting colour to", msg)
         monochrome = COLOURS[msg.decode()]
+    elif msg.decode()[0] == "#" and len(msg) == 7:
+        animation = False
+        colour_b = ubinascii.unhexlify(msg.decode()[1:])
+        solid = (colour_b[1], colour_b[0], colour_b[2])
     else:
         try:
             new_state = ujson.loads(msg.decode())
