@@ -8,6 +8,7 @@ import ujson
 import ubinascii
 import network
 import sys
+import esp
 
 from umqtt.robust import MQTTClient
 
@@ -256,6 +257,7 @@ def wdt(timer):
 print("Initialising")
 micropython.alloc_emergency_exception_buf(100)
 machine.freq(160000000)
+esp.sleep_type(esp.SLEEP_NONE)
 
 mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
                 password=mqttcreds.password)
