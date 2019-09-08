@@ -187,6 +187,8 @@ def message_callback(topic, msg):
         density = DENSITY_MAX
     elif msg == b"save":
         save_state()
+    elif msg == b"restore":
+        load_state()
     elif msg == b"solid":
         animation = False
     elif msg in (b"sparkle", b"sparkling"):
