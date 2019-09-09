@@ -17,7 +17,7 @@ import mqttcreds
 PIN = const(2)
 PIXELS = const(50)
 
-WD_TIMEOUT_MS = 1000
+WD_TIMEOUT_MS = 10000
 COLOUR_MIN = const(0)
 COLOUR_MAX = const(64)
 BOOST_MULTIPLIER = const(4)
@@ -28,7 +28,7 @@ DENSITY_MIN = const(1)
 DENSITY_STEP_MULTIPLIER = const(2)
 FADE_MULTIPLIER = const(15)
 FADE_DIVIDER = const(16)
-HOUSEKEEPING_INTERVAL_MS = const(15000)
+MQ_PING_INTERVAL_MS = const(15000)
 DELAY_MS = const(10)
 DELAY_STEP_MS = const(5)
 DELAY_MAX_MS = const(50)
@@ -240,18 +240,23 @@ def new_pixel_random():
 
 @micropython.native
 def animate(np):
+    rnd = uos.urandom(PIXELS)
     np.buf = bytearray([v * fade_multiplier // fade_divider
                         if v > 1 else 0 for v in np.buf])
-    rnd = uos.urandom(PIXELS)
-    for i in range(0, PIXELS):
+    for i in np_range:
         if rnd[i] < density and np[i] == BLACK_PIXEL:
             np[i] = (new_pixel_monochrome() if monochrome
                      else new_pixel_random())
 
 
 def wdt(timer):
-    global wd_fed
+    global wd_fed, op
     if not wd_fed:
+        print("Software WDT reset")
+        print("Stuck op:", op)
+        print("Mem alloc:", gc.mem_alloc())
+        print("Mem free:", gc.mem_free()) 
+        utime.sleep_ms(500)
         machine.reset()
     wd_fed = False
 
@@ -261,9 +266,11 @@ micropython.alloc_emergency_exception_buf(100)
 machine.freq(160000000)
 esp.sleep_type(esp.SLEEP_NONE)
 
+
 mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
                 password=mqttcreds.password)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
+np_range = range(0, PIXELS)
 
 np.fill(BLACK_PIXEL)
 
@@ -278,7 +285,7 @@ np[0] = RED_PIXEL
 np.write()
 sta = network.WLAN(network.STA_IF)
 while not sta.isconnected():
-    pass
+    utime.sleep_ms(RETRY_DELAY_MS)
 
 print("Connecting to MQ")
 np[1] = YELLOW_PIXEL
@@ -290,7 +297,7 @@ while not mq_connected:
         mq_connected = True
     except Exception as exception:
         print("Can't connect to MQ:", exception)
-        utime.sleep_ms(delay_ms)
+        utime.sleep_ms(RETRY_DELAY_MS)
 
 print("Subscribing to MQ")
 np[2] = GREEN_PIXEL
@@ -302,23 +309,43 @@ while not mq_subscribed:
         mq_subscribed = True
     except Exception as exception:
         print("Can't subscribe to MQ topic:", exception)
-        utime.sleep_ms(delay_ms)
+        utime.sleep_ms(RETRY_DELAY_MS)
+
+print("Deactivating Access Point interface")
+ap = network.WLAN(network.AP_IF)
+ap.active(False)
+
+sta = network.WLAN(network.STA_IF)
 
 print("Setting watchdog timer")
+op = "init"
 wd_fed = True
 wd = machine.Timer(-1)
 wd.init(period=WD_TIMEOUT_MS, mode=wd.PERIODIC, callback=wdt)
 
+#print("Disabling auto GC")
+#gc.disable()
+
+gc.threshold(10240)
+
 print("Starting main loop")
 while True:
     try:
-        gc.collect()
-        mq.ping()
-        deadline = utime.ticks_add(utime.ticks_ms(), HOUSEKEEPING_INTERVAL_MS)
+        op = "mq_ping"
+        if sta.isconnected():
+            mq.ping()
+        else:
+            print("Not connected - can't ping MQ")
+        deadline = utime.ticks_add(utime.ticks_ms(), MQ_PING_INTERVAL_MS)
         frames = 0
         while utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
-            mq.check_msg()
+            op = "mq_check"
+            if sta.isconnected():
+                mq.check_msg()
+            else:
+                print("Not connected - can't check MQ")
             wd_fed = True
+            op = "animation"
             if lights_on:
                 if animation:
                     animate(np)
@@ -326,10 +353,12 @@ while True:
                     np.fill(solid)
             else:
                 np.fill(BLACK_PIXEL)
+            op = "write"
             np.write()
+            op = "sleep"
             frames += 1
             utime.sleep_ms(delay_ms)
-        print("FPS:", frames * 1000 // HOUSEKEEPING_INTERVAL_MS)
+        print("FPS:", frames * 1000 // MQ_PING_INTERVAL_MS)
     except KeyboardInterrupt:
         wd.deinit()
         print("Ctrl+C pressed, exiting")
