@@ -329,6 +329,8 @@ wd.init(period=WD_TIMEOUT_MS, mode=wd.PERIODIC, callback=wdt)
 gc.threshold(10240)
 
 print("Starting main loop")
+
+uptime = 0
 while True:
     try:
         op = "mq_ping"
@@ -358,7 +360,8 @@ while True:
             op = "sleep"
             frames += 1
             utime.sleep_ms(delay_ms)
-        print("FPS:", frames * 1000 // MQ_PING_INTERVAL_MS)
+        uptime += MQ_PING_INTERVAL_MS / 1000
+        print("Uptime:", uptime, "FPS:", frames * 1000 // MQ_PING_INTERVAL_MS)
     except KeyboardInterrupt:
         wd.deinit()
         print("Ctrl+C pressed, exiting")
