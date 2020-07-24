@@ -111,7 +111,7 @@ def save_state():
         state_file.write(ujson.dumps(state))
         state_file.close()
     except OSError as exception:
-        print("Error saving state file:", exception)
+        print("Error saving state:", exception)
         return False
     return True
 
@@ -128,12 +128,12 @@ def load_state():
         state_string = state_file.read()
         state_file.close()
     except Exception as e:
-        print("Error reading state file:", e)
+        print("Error reading state:", e)
         return False
     try:
         new_state = ujson.loads(state_string)
     except ValueError:
-        print("State file not valid")
+        print("State not valid")
         return False
     set_state(new_state)
     return True
@@ -267,6 +267,9 @@ machine.freq(160000000)
 esp.sleep_type(esp.SLEEP_NONE)
 
 
+ap = network.WLAN(network.AP_IF)
+ap.active(True)
+
 mq = MQTTClient(CLIENT_ID, mqttcreds.host, user=mqttcreds.user,
                 password=mqttcreds.password)
 np = neopixel.NeoPixel(machine.Pin(PIN), PIXELS)
@@ -312,7 +315,6 @@ while not mq_subscribed:
         utime.sleep_ms(RETRY_DELAY_MS)
 
 print("Deactivating Access Point interface")
-ap = network.WLAN(network.AP_IF)
 ap.active(False)
 
 sta = network.WLAN(network.STA_IF)
